@@ -37,7 +37,7 @@
         width: 4px;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #e2e8f0;
+        background: #334155;
         border-radius: 10px;
       }
 
@@ -59,13 +59,18 @@
       }
     </style>
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
+  <body class="bg-slate-950 text-slate-100 antialiased">
     <div id="root"></div>
 
     <script type="text/babel">
       const { useState, useMemo, useCallback, useEffect } = React;
 
-      // --- DATABASE ENGINE (IndexedDB) ---
+      // --- CONSTANTES GIST ---
+      const GIST_ID = "a033a8f84d60a5cf1c1c01c73ecb6ce4";
+      const GIST_TOKEN = "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";
+      const GIST_FILENAME = "Finanzas.json";
+
+      // --- DATABASE ENGINE (IndexedDB & Gist) ---
       const DB_NAME = "PresupuestoBrianDB";
       const STORE_NAME = "quincenas";
 
@@ -109,6 +114,56 @@
         tx.objectStore(STORE_NAME).delete(id);
       };
 
+      const clearDB = async () => {
+        const db = await initDB();
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).clear();
+        return new Promise((resolve) => {
+          tx.oncomplete = () => resolve();
+        });
+      };
+
+      const pullFromGist = async () => {
+        try {
+          const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+            headers: {
+              Authorization: `token ${GIST_TOKEN}`
+            }
+          });
+          if (!res.ok) throw new Error("Gist Fetch Error");
+          const data = await res.json();
+          const fileContent = data.files[GIST_FILENAME]?.content;
+          if (fileContent) {
+            return JSON.parse(fileContent);
+          }
+          return [];
+        } catch (e) {
+          console.error("Error fetching from Gist:", e);
+          return null;
+        }
+      };
+
+      const pushToGist = async (historyData) => {
+        try {
+          await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+            method: "PATCH",
+            headers: {
+              Authorization: `token ${GIST_TOKEN}`,
+              Accept: "application/vnd.github.v3+json",
+            },
+            body: JSON.stringify({
+              files: {
+                [GIST_FILENAME]: {
+                  content: JSON.stringify(historyData, null, 2),
+                },
+              },
+            }),
+          });
+        } catch (e) {
+          console.error("Error saving to Gist:", e);
+        }
+      };
+
       // --- COMPONENTES AUXILIARES ---
       const Section = ({
         title,
@@ -125,17 +180,17 @@
         }, [data]);
 
         return (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+          <div className="bg-slate-900 rounded-2xl shadow-sm border border-slate-800 overflow-hidden mb-5">
             <div
-              className={`p-4 ${color} text-white flex justify-between items-center`}
+              className={`p-4 ${color.replace('bg-', 'bg-').replace('500', '600').replace('700', '800').replace('400', '700')} text-slate-100 flex justify-between items-center`}
             >
               <div className="flex items-center gap-2">
                 <i data-lucide={iconName} className="w-5 h-5 opacity-90"></i>
-                <h2 className="font-bold text-sm uppercase tracking-wider">
+                <h2 className="font-bold text-sm uppercase tracking-wider text-white">
                   {title}
                 </h2>
               </div>
-              <span className="font-mono font-bold text-lg">
+              <span className="font-mono font-bold text-lg text-white">
                 ${total.toLocaleString("es-MX", { minimumFractionDigits: 2 })}
               </span>
             </div>
@@ -145,7 +200,7 @@
                   <input
                     type="text"
                     placeholder="Concepto"
-                    className="flex-1 p-2.5 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-all placeholder:text-slate-300"
+                    className="flex-1 p-2.5 bg-slate-800 border border-slate-700/50 rounded-xl focus:bg-slate-700 focus:ring-2 focus:ring-blue-500/50 outline-none text-sm transition-all placeholder:text-slate-500 text-slate-200"
                     value={item.concepto}
                     onChange={(e) =>
                       onUpdate(item.id, "concepto", e.target.value)
@@ -158,7 +213,7 @@
                     <input
                       type="number"
                       placeholder="0"
-                      className="w-full p-2.5 pl-6 bg-slate-50 border border-slate-100 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm text-right font-semibold"
+                      className="w-full p-2.5 pl-6 bg-slate-800 border border-slate-700/50 rounded-xl focus:bg-slate-700 focus:ring-2 focus:ring-blue-500/50 outline-none text-sm text-right font-semibold text-slate-200"
                       value={item.monto || ""}
                       onChange={(e) =>
                         onUpdate(item.id, "monto", e.target.value)
@@ -167,7 +222,7 @@
                   </div>
                   <button
                     onClick={() => onRemove(item.id)}
-                    className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
                   >
                     <i data-lucide="trash-2" className="w-4 h-4"></i>
                   </button>
@@ -175,7 +230,7 @@
               ))}
               <button
                 onClick={onAdd}
-                className="w-full py-2.5 border-2 border-dashed border-slate-100 rounded-xl flex items-center justify-center gap-2 text-slate-400 hover:text-blue-600 hover:border-blue-100 hover:bg-blue-50 transition-all text-xs font-bold uppercase tracking-widest"
+                className="w-full py-2.5 border-2 border-dashed border-slate-700 rounded-xl flex items-center justify-center gap-2 text-slate-400 hover:text-blue-400 hover:border-blue-900 hover:bg-blue-900/20 transition-all text-xs font-bold uppercase tracking-widest"
               >
                 <i data-lucide="plus-circle" className="w-4 h-4"></i> Agregar
               </button>
@@ -185,6 +240,7 @@
       };
 
       const App = () => {
+        const [isOnline, setIsOnline] = useState(navigator.onLine);
         const [history, setHistory] = useState([]);
         const [showHistory, setShowHistory] = useState(false);
         const [isSaving, setIsSaving] = useState(false);
@@ -199,13 +255,38 @@
         });
 
         useEffect(() => {
+          const handleOnline = () => setIsOnline(true);
+          const handleOffline = () => setIsOnline(false);
+          window.addEventListener("online", handleOnline);
+          window.addEventListener("offline", handleOffline);
+          
           loadHistory();
           if (window.lucide) window.lucide.createIcons();
+          
+          return () => {
+            window.removeEventListener("online", handleOnline);
+            window.removeEventListener("offline", handleOffline);
+          };
         }, []);
 
         const loadHistory = async () => {
-          const data = await getAllFromDB();
-          const sorted = data.sort(
+          let finalData = [];
+          if (navigator.onLine) {
+            const gistData = await pullFromGist();
+            if (gistData && gistData.length > 0) {
+              await clearDB();
+              for (const item of gistData) {
+                await saveToDB(item);
+              }
+              finalData = gistData;
+            } else {
+              finalData = await getAllFromDB();
+            }
+          } else {
+            finalData = await getAllFromDB();
+          }
+          
+          const sorted = finalData.sort(
             (a, b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion),
           );
           setHistory(sorted);
@@ -214,6 +295,12 @@
         const saveCurrentPlan = async () => {
           setIsSaving(true);
           await saveToDB(currentPlan);
+          
+          if (navigator.onLine) {
+             const allLocal = await getAllFromDB();
+             await pushToGist(allLocal);
+          }
+          
           await loadHistory();
           setTimeout(() => setIsSaving(false), 1500);
         };
@@ -260,6 +347,12 @@
           // esto podría no mostrarse, pero es funcional en archivos locales.
           if (window.confirm("¿Estás seguro de eliminar este registro?")) {
             await deleteFromDB(id);
+            
+            if (navigator.onLine) {
+               const allLocal = await getAllFromDB();
+               await pushToGist(allLocal);
+            }
+            
             await loadHistory();
             if (currentPlan.id === id) {
               setCurrentPlan({
@@ -314,15 +407,15 @@
           <div className="min-h-screen pb-24 md:pb-8 pt-4 md:pt-8 px-4 max-w-5xl mx-auto">
             {/* Historial Overlay */}
             {showHistory && (
-              <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex justify-end">
-                <div className="w-[85%] max-w-xs bg-white h-full shadow-2xl p-6 flex flex-col animate-slide-in">
+              <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex justify-end">
+                <div className="w-[85%] max-w-xs bg-slate-900 border-l border-slate-800 h-full shadow-2xl p-6 flex flex-col animate-slide-in">
                   <div className="flex items-center justify-between mb-8">
-                    <h2 className="font-extrabold text-xl text-slate-900 tracking-tight">
+                    <h2 className="font-extrabold text-xl text-white tracking-tight">
                       HISTORIAL
                     </h2>
                     <button
                       onClick={() => setShowHistory(false)}
-                      className="p-2 bg-slate-100 text-slate-600 rounded-full"
+                      className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full transition-colors"
                     >
                       <i data-lucide="x" className="w-5 h-5"></i>
                     </button>
@@ -356,13 +449,13 @@
                           setCurrentPlan(plan);
                           setShowHistory(false);
                         }}
-                        className={`p-4 rounded-2xl border flex justify-between items-center transition-all ${currentPlan.id === plan.id ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500" : "border-slate-100 bg-slate-50"}`}
+                        className={`p-4 rounded-2xl border flex justify-between items-center transition-all cursor-pointer ${currentPlan.id === plan.id ? "border-blue-500 bg-blue-500/10 ring-1 ring-blue-500" : "border-slate-800 bg-slate-800/50 hover:bg-slate-800"}`}
                       >
                         <div className="flex flex-col">
-                          <p className="font-bold text-sm text-slate-800 leading-tight">
+                          <p className="font-bold text-sm text-slate-200 leading-tight">
                             {plan.periodo || "Quincena sin nombre"}
                           </p>
-                          <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-wider">
+                          <p className="text-[10px] text-slate-500 mt-1 uppercase font-bold tracking-wider">
                             {new Date(plan.fechaCreacion).toLocaleDateString()}
                           </p>
                         </div>
@@ -382,26 +475,26 @@
             <header className="mb-8">
               <div className="flex flex-row justify-between items-center mb-6">
                 <div className="flex flex-col">
-                  <h1 className="text-2xl font-extrabold text-slate-900 tracking-tighter leading-none mb-1">
+                  <h1 className="text-2xl font-extrabold text-white tracking-tighter leading-none mb-1">
                     FINANZAS BRIAN
                   </h1>
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-                      Local Database
+                    <span className={`w-2 h-2 rounded-full animate-pulse ${isOnline ? "bg-emerald-500" : "bg-amber-500"}`}></span>
+                    <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${isOnline ? "text-emerald-500/80" : "text-amber-500/80"}`}>
+                      {isOnline ? "Gist Cloud Sync" : "Modo Offline"}
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setShowHistory(true)}
-                    className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 shadow-sm active:bg-slate-50"
+                    className="p-2.5 bg-slate-800 border border-slate-700 hover:bg-slate-700 rounded-xl text-slate-300 shadow-sm active:bg-slate-900 transition-colors"
                   >
                     <i data-lucide="history" className="w-5 h-5"></i>
                   </button>
                   <button
                     onClick={saveCurrentPlan}
-                    className={`hidden md:flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg ${isSaving ? "btn-saved text-white" : "bg-slate-900 text-white hover:bg-slate-800"}`}
+                    className={`hidden md:flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg ${isSaving ? "btn-saved text-white" : "bg-white text-slate-900 hover:bg-slate-200"}`}
                   >
                     <i
                       data-lucide={isSaving ? "check" : "save"}
@@ -412,14 +505,14 @@
                 </div>
               </div>
 
-              <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-200 flex flex-col gap-1 transition-all focus-within:ring-2 focus-within:ring-blue-100">
-                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest ml-1">
+              <div className="bg-slate-900 p-5 rounded-3xl shadow-sm border border-slate-800 flex flex-col gap-1 transition-all focus-within:ring-2 focus-within:ring-blue-500/50">
+                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest ml-1">
                   Periodo Actual
                 </label>
                 <input
                   type="text"
                   placeholder="Escribe el nombre de la quincena..."
-                  className="w-full text-xl font-bold bg-transparent border-none focus:ring-0 p-0 text-slate-800 placeholder:text-slate-200"
+                  className="w-full text-xl font-bold bg-transparent border-none focus:ring-0 p-0 text-white placeholder:text-slate-600 outline-none"
                   value={currentPlan.periodo}
                   onChange={(e) =>
                     setCurrentPlan((prev) => ({
@@ -433,27 +526,27 @@
 
             {/* Dashboard Grid - 2x2 en mobile, 1x4 en desktop */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">
+              <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-500 uppercase mb-1 tracking-wider">
                   Ingresos
                 </p>
-                <p className="text-lg font-mono font-black text-emerald-600 tracking-tighter">
+                <p className="text-lg font-mono font-black text-emerald-500 tracking-tighter">
                   ${totalIngresos.toLocaleString()}
                 </p>
               </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">
+              <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-500 uppercase mb-1 tracking-wider">
                   Ahorro
                 </p>
-                <p className="text-lg font-mono font-black text-blue-600 tracking-tighter">
+                <p className="text-lg font-mono font-black text-blue-500 tracking-tighter">
                   ${totalAhorros.toLocaleString()}
                 </p>
               </div>
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 tracking-wider">
+              <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-sm">
+                <p className="text-[10px] font-bold text-slate-500 uppercase mb-1 tracking-wider">
                   Gastos
                 </p>
-                <p className="text-lg font-mono font-black text-slate-700 tracking-tighter">
+                <p className="text-lg font-mono font-black text-slate-300 tracking-tighter">
                   ${(totalFijos + totalVariables).toLocaleString()}
                 </p>
               </div>
@@ -513,20 +606,20 @@
             </div>
 
             {/* Mobile Floating Bar */}
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-slate-100 flex items-center justify-between gap-4 md:hidden z-50">
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-slate-950/80 backdrop-blur-md border-t border-slate-800 flex items-center justify-between gap-4 md:hidden z-50">
               <div className="flex flex-col">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
                   Saldo Final
                 </p>
                 <p
-                  className={`text-xl font-mono font-black tracking-tighter ${balance >= 0 ? "text-blue-600" : "text-red-600"}`}
+                  className={`text-xl font-mono font-black tracking-tighter ${balance >= 0 ? "text-blue-500" : "text-red-500"}`}
                 >
                   ${balance.toLocaleString()}
                 </p>
               </div>
               <button
                 onClick={saveCurrentPlan}
-                className={`flex-1 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 ${isSaving ? "btn-saved text-white" : "bg-slate-900 text-white"}`}
+                className={`flex-1 py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2 ${isSaving ? "btn-saved text-slate-900" : "bg-white text-slate-900"}`}
               >
                 <i
                   data-lucide={isSaving ? "check-circle" : "save"}
