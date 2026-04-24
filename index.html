@@ -13,6 +13,8 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Tailwind CSS para los estilos -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
@@ -64,10 +66,10 @@
     <script type="text/babel">
       const { useState, useMemo, useCallback, useEffect } = React;
 
-      // --- CONSTANTES GIST ---
-      const GIST_ID = "a033a8f84d60a5cf1c1c01c73ecb6ce4";
-      const GIST_TOKEN = "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";
-      const GIST_FILENAME = "Finanzas.json";
+      // --- CONSTANTES SUPABASE ---
+      const SUPABASE_URL = "https://dxrjtrycheooniotrjfz.supabase.co";
+      const SUPABASE_KEY = "sb_publishable__1n9OocWGlvFksTIu9Zfkg_ozNRmPaX";
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
       // --- DATABASE ENGINE (IndexedDB & Gist) ---
       const DB_NAME = "PresupuestoDB";
@@ -122,45 +124,81 @@
         });
       };
 
-      const pullFromGist = async () => {
+      const generateUUID = () => crypto.randomUUID();
+
+      const fetchFromSupabase = async (userId) => {
         try {
-          const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-            headers: {
-              Authorization: `token ${GIST_TOKEN}`,
-            },
+          const { data, error } = await supabase
+            .from("planes")
+            .select(`id, user_id, periodo, fecha_creacion, movimientos (id, tipo, concepto, monto)`)
+            .eq("user_id", userId);
+          if (error) throw error;
+          
+          return data.map(plan => {
+            const getMovType = (type) => plan.movimientos.filter(m => m.tipo === type);
+            return {
+              id: plan.id,
+              periodo: plan.periodo,
+              fechaCreacion: plan.fecha_creacion,
+              ingresos: getMovType("ingreso"),
+              ahorros: getMovType("ahorro"),
+              gastosFijos: getMovType("fijo"),
+              gastosVariables: getMovType("variable"),
+            };
           });
-          if (!res.ok) throw new Error("Gist Fetch Error");
-          const data = await res.json();
-          const fileContent = data.files[GIST_FILENAME]?.content;
-          if (fileContent) {
-            return JSON.parse(fileContent);
-          }
-          return [];
         } catch (e) {
-          console.error("Error fetching from Gist:", e);
+          console.error("Error al obtener de Supabase:", e);
           return null;
         }
       };
 
-      const pushToGist = async (historyData) => {
+      const upsertSupabase = async (plan, userId) => {
         try {
-          await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-            method: "PATCH",
-            headers: {
-              Authorization: `token ${GIST_TOKEN}`,
-              Accept: "application/vnd.github.v3+json",
-            },
-            body: JSON.stringify({
-              files: {
-                [GIST_FILENAME]: {
-                  content: JSON.stringify(historyData, null, 2),
-                },
-              },
-            }),
+          const { error: planErr } = await supabase.from("planes").upsert({
+            id: plan.id,
+            user_id: userId,
+            periodo: plan.periodo,
+            fecha_creacion: plan.fechaCreacion
           });
+          if (planErr) throw planErr;
+
+          await supabase.from("movimientos").delete().eq("plan_id", plan.id);
+          
+          const formatMov = (items, tipo) => items.map(i => ({
+            id: i.id && i.id.length === 36 ? i.id : generateUUID(),
+            plan_id: plan.id,
+            tipo,
+            concepto: i.concepto,
+            monto: i.monto
+          }));
+          
+          const allMovs = [
+            ...formatMov(plan.ingresos, "ingreso"),
+            ...formatMov(plan.ahorros, "ahorro"),
+            ...formatMov(plan.gastosFijos, "fijo"),
+            ...formatMov(plan.gastosVariables, "variable")
+          ];
+          
+          if (allMovs.length > 0) {
+            const { error: movErr } = await supabase.from("movimientos").insert(allMovs);
+            if (movErr) throw movErr;
+          }
+          return null; // Éxito
         } catch (e) {
-          console.error("Error saving to Gist:", e);
+          console.error("Error al guardar en Supabase:", e);
+          return e.message || "Error desconocido"; // Devolver el error
         }
+      };
+      
+      const deletePlanSupabase = async (planId) => {
+         try {
+             const { error } = await supabase.from("planes").delete().eq("id", planId);
+             if (error) throw error;
+             return null;
+         } catch(e) {
+             console.error("Error al borrar en Supabase:", e);
+             return e.message || "Error desconocido";
+         }
       };
 
       // --- COMPONENTES AUXILIARES ---
@@ -238,18 +276,18 @@
         );
       };
 
-      const App = () => {
+      const MainApp = ({ session }) => {
         const [isOnline, setIsOnline] = useState(navigator.onLine);
         const [history, setHistory] = useState([]);
         const [showHistory, setShowHistory] = useState(false);
         const [isSaving, setIsSaving] = useState(false);
         const [currentPlan, setCurrentPlan] = useState({
-          id: `plan-${Date.now()}`,
+          id: generateUUID(),
           periodo: "",
-          ingresos: [{ id: "i1", concepto: "Sueldo", monto: 0 }],
-          ahorros: [{ id: "a1", concepto: "Ahorro", monto: 0 }],
-          gastosFijos: [{ id: "gf1", concepto: "Renta", monto: 0 }],
-          gastosVariables: [{ id: "gv1", concepto: "Comida", monto: 0 }],
+          ingresos: [{ id: generateUUID(), concepto: "Sueldo", monto: 0 }],
+          ahorros: [{ id: generateUUID(), concepto: "Ahorro", monto: 0 }],
+          gastosFijos: [{ id: generateUUID(), concepto: "Renta", monto: 0 }],
+          gastosVariables: [{ id: generateUUID(), concepto: "Comida", monto: 0 }],
           fechaCreacion: new Date().toISOString(),
         });
 
@@ -271,13 +309,13 @@
         const loadHistory = async () => {
           let finalData = [];
           if (navigator.onLine) {
-            const gistData = await pullFromGist();
-            if (gistData && gistData.length > 0) {
+            const supabaseData = await fetchFromSupabase(session.user.id);
+            if (supabaseData && supabaseData.length > 0) {
               await clearDB();
-              for (const item of gistData) {
+              for (const item of supabaseData) {
                 await saveToDB(item);
               }
-              finalData = gistData;
+              finalData = supabaseData;
             } else {
               finalData = await getAllFromDB();
             }
@@ -296,8 +334,10 @@
           await saveToDB(currentPlan);
 
           if (navigator.onLine) {
-            const allLocal = await getAllFromDB();
-            await pushToGist(allLocal);
+            const err = await upsertSupabase(currentPlan, session.user.id);
+            if (err) {
+              alert("Error guardando en la Nube (Solo se guardó local): " + err);
+            }
           }
 
           await loadHistory();
@@ -328,7 +368,7 @@
             ...prev,
             [section]: [
               ...prev[section],
-              { id: `${prefix}-${Date.now()}`, concepto: "", monto: 0 },
+              { id: generateUUID(), concepto: "", monto: 0 },
             ],
           }));
         };
@@ -342,25 +382,25 @@
 
         const deletePlan = async (e, id) => {
           e.stopPropagation();
-          // Nota: Usamos una confirmación simple. En entornos restringidos de iframes,
-          // esto podría no mostrarse, pero es funcional en archivos locales.
           if (window.confirm("¿Estás seguro de eliminar este registro?")) {
             await deleteFromDB(id);
 
             if (navigator.onLine) {
-              const allLocal = await getAllFromDB();
-              await pushToGist(allLocal);
+              const err = await deletePlanSupabase(id);
+              if (err) {
+                 alert("Borrador local existoso, pero en la Nube falló: " + err);
+              }
             }
 
             await loadHistory();
             if (currentPlan.id === id) {
               setCurrentPlan({
-                id: `plan-${Date.now()}`,
+                id: generateUUID(),
                 periodo: "Nueva Quincena",
-                ingresos: [{ id: "i1", concepto: "Sueldo", monto: 0 }],
-                ahorros: [{ id: "a1", concepto: "Ahorro", monto: 0 }],
-                gastosFijos: [{ id: "gf1", concepto: "Renta", monto: 0 }],
-                gastosVariables: [{ id: "gv1", concepto: "Comida", monto: 0 }],
+                ingresos: [{ id: generateUUID(), concepto: "Sueldo", monto: 0 }],
+                ahorros: [{ id: generateUUID(), concepto: "Ahorro", monto: 0 }],
+                gastosFijos: [{ id: generateUUID(), concepto: "Renta", monto: 0 }],
+                gastosVariables: [{ id: generateUUID(), concepto: "Comida", monto: 0 }],
                 fechaCreacion: new Date().toISOString(),
               });
             }
@@ -422,15 +462,15 @@
                   <button
                     onClick={() => {
                       setCurrentPlan({
-                        id: `plan-${Date.now()}`,
+                        id: generateUUID(),
                         periodo: "Nueva Quincena",
-                        ingresos: [{ id: "i1", concepto: "Sueldo", monto: 0 }],
-                        ahorros: [{ id: "a1", concepto: "Ahorro", monto: 0 }],
+                        ingresos: [{ id: generateUUID(), concepto: "Sueldo", monto: 0 }],
+                        ahorros: [{ id: generateUUID(), concepto: "Ahorro", monto: 0 }],
                         gastosFijos: [
-                          { id: "gf1", concepto: "Renta", monto: 0 },
+                          { id: generateUUID(), concepto: "Renta", monto: 0 },
                         ],
                         gastosVariables: [
-                          { id: "gv1", concepto: "Comida", monto: 0 },
+                          { id: generateUUID(), concepto: "Comida", monto: 0 },
                         ],
                         fechaCreacion: new Date().toISOString(),
                       });
@@ -484,14 +524,22 @@
                     <p
                       className={`text-[10px] font-bold uppercase tracking-[0.2em] ${isOnline ? "text-emerald-500/80" : "text-amber-500/80"}`}
                     >
-                      {isOnline ? "Gist Cloud Sync" : "Modo Offline"}
+                      {isOnline ? "Supabase Activo" : "Modo Offline"}
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <button
+                    onClick={() => supabase.auth.signOut()}
+                    className="p-2.5 bg-slate-800 border border-slate-700 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 rounded-xl text-slate-400 shadow-sm transition-colors"
+                    title="Cerrar Sesión"
+                  >
+                    <i data-lucide="log-out" className="w-5 h-5"></i>
+                  </button>
+                  <button
                     onClick={() => setShowHistory(true)}
                     className="p-2.5 bg-slate-800 border border-slate-700 hover:bg-slate-700 rounded-xl text-slate-300 shadow-sm active:bg-slate-900 transition-colors"
+                    title="Historial"
                   >
                     <i data-lucide="history" className="w-5 h-5"></i>
                   </button>
@@ -638,6 +686,95 @@
             </footer>
           </div>
         );
+      };
+
+      const App = () => {
+        const [session, setSession] = useState(null);
+        const [authEmail, setAuthEmail] = useState("");
+        const [authPassword, setAuthPassword] = useState("");
+        const [authLoading, setAuthLoading] = useState(false);
+        const [authMode, setAuthMode] = useState("login");
+
+        useEffect(() => {
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+          });
+          const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+          });
+          return () => subscription.unsubscribe();
+        }, []);
+
+        const handleAuth = async (e) => {
+          e.preventDefault();
+          setAuthLoading(true);
+          let error = null;
+          if (authMode === "login") {
+            const res = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+            error = res.error;
+          } else {
+            const res = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+            error = res.error;
+            if (!error) alert("Revisa tu email (si tienes habilitada la confirmación) o inicia sesión ahora.");
+          }
+          setAuthLoading(false);
+          if (error) alert("Error: " + error.message);
+        };
+
+        if (!session) {
+          return (
+            <div className="min-h-screen flex items-center justify-center p-4">
+              <form onSubmit={handleAuth} className="bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-xl w-full max-w-sm flex flex-col gap-5 animate-slide-in">
+                <div className="text-center mb-4">
+                  <h1 className="text-2xl font-black text-white tracking-tighter">FINANZAS</h1>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Autenticación Supabase</p>
+                </div>
+                
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Email</label>
+                  <input 
+                    type="email" 
+                    required 
+                    value={authEmail} 
+                    onChange={e => setAuthEmail(e.target.value)} 
+                    className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="tucorreo@ejemplo.com"
+                  />
+                </div>
+                
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Contraseña</label>
+                  <input 
+                    type="password" 
+                    required 
+                    value={authPassword} 
+                    onChange={e => setAuthPassword(e.target.value)} 
+                    className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="••••••••"
+                  />
+                </div>
+                
+                <button 
+                  type="submit" 
+                  disabled={authLoading}
+                  className="mt-2 w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all rounded-xl text-white font-bold uppercase tracking-widest disabled:opacity-50"
+                >
+                  {authLoading ? "Cargando..." : (authMode === "login" ? "Ingresar" : "Registrarse")}
+                </button>
+                
+                <button 
+                  type="button" 
+                  onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
+                  className="text-xs font-bold text-slate-500 hover:text-slate-300 mt-2 transition-colors uppercase tracking-widest"
+                >
+                  {authMode === "login" ? "¿No tienes cuenta? Regístrate" : "Ya tengo cuenta, iniciar sesión"}
+                </button>
+              </form>
+            </div>
+          );
+        }
+
+        return <MainApp session={session} />;
       };
 
       const root = ReactDOM.createRoot(document.getElementById("root"));
