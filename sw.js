@@ -37,7 +37,13 @@ self.addEventListener('fetch', event => {
   
   event.respondWith(
     caches.match(event.request).then(response => {
-      return response || fetch(event.request);
-    }).catch(() => caches.match('./index.html'))
+      return response || fetch(event.request).catch(err => {
+         // Si es una petición de navegación (HTML), devuelve el index offline
+         if (event.request.mode === 'navigate') {
+            return caches.match('./index.html');
+         }
+         throw err;
+      });
+    })
   );
 });
